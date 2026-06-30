@@ -1,0 +1,2 @@
+nodes,edges,density,average_degree,minimum_degree,maximum_degree,median_degree,connected_components,largest_component,average_clustering
+12544,66809,0.0008492342464371541,10.651945153061224,2,20,11.0,1,12544,0.49749183893928756
