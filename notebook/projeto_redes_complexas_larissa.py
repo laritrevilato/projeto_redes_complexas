@@ -10,7 +10,7 @@ Original file is located at
 # Instala as bibliotecas necessárias para leitura de PDB,
 # análise de redes, manipulação de dados e visualização 3D.
 
-!pip install biopython py3Dmol
+#!pip install biopython py3Dmol
 
 # Importa as bibliotecas utilizadas no projeto e cria as pastas
 # onde serão salvos os resultados, tabelas e figuras.
@@ -18,6 +18,8 @@ Original file is located at
 import os
 import time
 import tarfile
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -26,20 +28,72 @@ import py3Dmol
 
 from Bio.PDB import PDBParser
 from scipy.spatial import cKDTree
-from collections import Counter
 from networkx.algorithms.community import louvain_communities
 from networkx.algorithms.community.quality import modularity
 
-os.makedirs("results", exist_ok=True)
-os.makedirs("results/figures", exist_ok=True)
-os.makedirs("results/tables", exist_ok=True)
+# Permite usar display() tanto no Jupyter/Colab quanto ao executar como script local.
+try:
+    from IPython.display import display
+except ImportError:
+    def display(obj):
+        print(obj)
+
+
+# Permite exibir visualizações 3D apenas em ambiente interativo
+# (Jupyter/Google Colab). Ao executar este arquivo como script local
+# pelo Terminal, as visualizações py3Dmol são ignoradas para evitar erro.
+def show_3d_view(view, description="visualização 3D"):
+    try:
+        from IPython import get_ipython
+        shell = get_ipython()
+
+        if shell is None or shell.__class__.__name__ == "TerminalInteractiveShell":
+            print(f"{description} ignorada: execute esta etapa no notebook/Colab para visualizar em 3D.")
+            return
+
+        view.zoomTo()
+        view.show()
+
+    except Exception as error:
+        print(f"{description} ignorada: não foi possível renderizar a visualização 3D neste ambiente.")
+        print(f"Motivo: {error}")
+
+# ==========================================================
+# Configuração de caminhos do projeto
+#
+# Este arquivo .py está dentro da pasta notebook/.
+# Por isso, a raiz do projeto é a pasta imediatamente acima.
+#
+# Estrutura esperada:
+# projeto_redes_complexas/
+# ├── data/
+# ├── notebook/
+# ├── report/
+# └── results/
+# ==========================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
+
+DATA_DIR = PROJECT_DIR / "data"
+RESULTS_DIR = PROJECT_DIR / "results"
+FIGURES_DIR = RESULTS_DIR / "figures"
+TABLES_DIR = RESULTS_DIR / "tables"
+
+RESULTS_DIR.mkdir(exist_ok=True)
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+TABLES_DIR.mkdir(parents=True, exist_ok=True)
+
+pdb_1ubq = DATA_DIR / "1UBQ.pdb"
+tar_6b1t = DATA_DIR / "6b1t-pdb-bundle.tar"
+extract_dir = DATA_DIR / "6b1t_files"
 
 # Lê um arquivo PDB e extrai apenas os resíduos que possuem átomo Cα.
 # Cada resíduo será representado como um nó da rede.
 
 def extract_ca_residues(pdb_file, structure_id="protein"):
     parser = PDBParser(QUIET=True)
-    structure = parser.get_structure(structure_id, pdb_file)
+    structure = parser.get_structure(structure_id, str(pdb_file))
 
     data = []
 
@@ -175,14 +229,12 @@ def plot_community_graph(G, partition, title, output_path):
 # Executa o pipeline completo para a proteína pequena 1UBQ.
 # Esta etapa valida o funcionamento do código antes da aplicação na 6B1T.
 
-pdb_1ubq = "1UBQ.pdb"
-
 df_1ubq = extract_ca_residues(pdb_1ubq, "1UBQ")
 G_1ubq = build_contact_graph(df_1ubq, cutoff=8.0)
 communities_1ubq, partition_1ubq = detect_louvain(G_1ubq)
 
 stats_1ubq = calculate_graph_statistics(G_1ubq)
-stats_1ubq.to_csv("results/tables/1UBQ_graph_statistics.csv", index=False)
+stats_1ubq.to_csv(TABLES_DIR / "1UBQ_graph_statistics.csv", index=False)
 
 print("1UBQ")
 print("Nós:", G_1ubq.number_of_nodes())
@@ -215,7 +267,7 @@ df_centrality_1ubq = pd.DataFrame([
 ])
 
 df_centrality_1ubq.to_csv(
-    "results/tables/1UBQ_centralities.csv",
+    TABLES_DIR / "1UBQ_centralities.csv",
     index=False
 )
 
@@ -228,15 +280,14 @@ plot_community_graph(
     G_1ubq,
     partition_1ubq,
     "Rede de contatos da proteína 1UBQ",
-    "results/figures/1UBQ_community_graph.png"
+    FIGURES_DIR / "1UBQ_community_graph.png"
 )
 
 # Descompacta o pacote da estrutura 6B1T baixado do PDB.
 
-tar_path = "6b1t-pdb-bundle.tar"
-extract_dir = "6b1t_files"
+tar_path = tar_6b1t
 
-if not os.path.exists(extract_dir):
+if not extract_dir.exists():
     with tarfile.open(tar_path, "r") as tar:
         tar.extractall(extract_dir)
 
@@ -247,8 +298,8 @@ for root, dirs, files in os.walk(extract_dir):
 # A estrutura 6B1T vem dividida em dois arquivos PDB.
 # Os dois arquivos são lidos e integrados em uma única tabela de resíduos.
 
-pdb_6b1t_1 = "6b1t_files/6b1t-pdb-bundle1.pdb"
-pdb_6b1t_2 = "6b1t_files/6b1t-pdb-bundle2.pdb"
+pdb_6b1t_1 = extract_dir / "6b1t-pdb-bundle1.pdb"
+pdb_6b1t_2 = extract_dir / "6b1t-pdb-bundle2.pdb"
 
 df_6b1t_1 = extract_ca_residues(pdb_6b1t_1, "6B1T_1")
 df_6b1t_2 = extract_ca_residues(pdb_6b1t_2, "6B1T_2")
@@ -260,7 +311,7 @@ print("Bundle 1:", df_6b1t_1.shape)
 print("Bundle 2:", df_6b1t_2.shape)
 print("Total:", df_6b1t.shape)
 
-df_6b1t.to_csv("results/tables/6B1T_residues.csv", index=False)
+df_6b1t.to_csv(TABLES_DIR / "6B1T_residues.csv", index=False)
 
 df_6b1t.head()
 
@@ -296,7 +347,7 @@ def test_cutoffs(df_residues, cutoffs, seed=42):
 cutoffs = [6.0, 7.0, 8.0, 9.0, 10.0]
 
 df_cutoffs = test_cutoffs(df_6b1t, cutoffs)
-df_cutoffs.to_csv("results/tables/6B1T_cutoff_tests.csv", index=False)
+df_cutoffs.to_csv(TABLES_DIR / "6B1T_cutoff_tests.csv", index=False)
 
 df_cutoffs
 
@@ -309,7 +360,7 @@ plt.xlabel("Cutoff de distância (Å)")
 plt.ylabel("Número de comunidades")
 plt.title("Número de comunidades por cutoff - 6B1T")
 plt.grid(True)
-plt.savefig("results/figures/6B1T_cutoff_communities.png", dpi=300, bbox_inches="tight")
+plt.savefig(FIGURES_DIR / "6B1T_cutoff_communities.png", dpi=300, bbox_inches="tight")
 plt.show()
 
 plt.figure(figsize=(7, 4))
@@ -318,7 +369,7 @@ plt.xlabel("Cutoff de distância (Å)")
 plt.ylabel("Modularidade")
 plt.title("Modularidade por cutoff - 6B1T")
 plt.grid(True)
-plt.savefig("results/figures/6B1T_cutoff_modularity.png", dpi=300, bbox_inches="tight")
+plt.savefig(FIGURES_DIR / "6B1T_cutoff_modularity.png", dpi=300, bbox_inches="tight")
 plt.show()
 
 # Constrói a rede final da proteína 6B1T usando cutoff = 8 Å,
@@ -328,7 +379,7 @@ G_6b1t = build_contact_graph(df_6b1t, cutoff=8.0)
 communities_6b1t, partition_6b1t = detect_louvain(G_6b1t)
 
 stats_6b1t = calculate_graph_statistics(G_6b1t)
-stats_6b1t.to_csv("results/tables/6B1T_graph_statistics.csv", index=False)
+stats_6b1t.to_csv(TABLES_DIR / "6B1T_graph_statistics.csv", index=False)
 
 print("6B1T")
 print("Nós:", G_6b1t.number_of_nodes())
@@ -350,7 +401,7 @@ df_communities_6b1t = pd.DataFrame([
 ])
 
 df_communities_6b1t.to_csv(
-    "results/tables/6B1T_communities.csv",
+    TABLES_DIR / "6B1T_communities.csv",
     index=False
 )
 
@@ -362,7 +413,7 @@ df_communities_6b1t["community"].value_counts().sort_index()
 plot_degree_distribution(
     G_6b1t,
     "Distribuição de graus - 6B1T",
-    "results/figures/6B1T_degree_distribution.png"
+    FIGURES_DIR / "6B1T_degree_distribution.png"
 )
 
 # Salva a distribuição de graus em CSV para documentação dos resultados.
@@ -382,7 +433,7 @@ df_degree_distribution_6b1t["probability"] = (
 )
 
 df_degree_distribution_6b1t.to_csv(
-    "results/tables/6B1T_degree_distribution.csv",
+    TABLES_DIR / "6B1T_degree_distribution.csv",
     index=False
 )
 
@@ -458,7 +509,7 @@ df_centrality_6b1t = pd.DataFrame([
 ])
 
 df_centrality_6b1t.to_csv(
-    "results/tables/6B1T_centralities.csv",
+    TABLES_DIR / "6B1T_centralities.csv",
     index=False
 )
 
@@ -481,9 +532,9 @@ top_betweenness_6b1t = df_centrality_6b1t.sort_values(
     ascending=False
 ).head(20)
 
-top_degree_6b1t.to_csv("results/tables/6B1T_top_degree.csv", index=False)
-top_eigenvector_6b1t.to_csv("results/tables/6B1T_top_eigenvector.csv", index=False)
-top_betweenness_6b1t.to_csv("results/tables/6B1T_top_betweenness_approx.csv", index=False)
+top_degree_6b1t.to_csv(TABLES_DIR / "6B1T_top_degree.csv", index=False)
+top_eigenvector_6b1t.to_csv(TABLES_DIR / "6B1T_top_eigenvector.csv", index=False)
+top_betweenness_6b1t.to_csv(TABLES_DIR / "6B1T_top_betweenness_approx.csv", index=False)
 
 display(top_degree_6b1t)
 display(top_eigenvector_6b1t)
@@ -526,8 +577,7 @@ for _, row in df_communities_6b1t.iterrows():
         }
     )
 
-view.zoomTo()
-view.show()
+show_3d_view(view, "Visualização 3D das comunidades da 6B1T")
 
 # Visualiza em 3D os 20 resíduos com maior grau.
 # A proteína fica em cinza e os resíduos mais conectados são destacados.
@@ -560,13 +610,12 @@ for node in top_nodes:
         }
     )
 
-view.zoomTo()
-view.show()
+show_3d_view(view, "Visualização 3D dos resíduos mais conectados da 6B1T")
 
 # Lista todos os arquivos gerados para conferir se as tabelas e figuras
 # necessárias ao relatório foram salvas corretamente.
 
-for root, dirs, files in os.walk("results"):
+for root, dirs, files in os.walk(RESULTS_DIR):
     for file in files:
         print(os.path.join(root, file))
 
@@ -608,7 +657,7 @@ def plot_top_centrality(df, column, title, filename, top_n=15):
     plt.tight_layout()
 
     plt.savefig(
-        f"results/figures/{filename}",
+        FIGURES_DIR / filename,
         dpi=300,
         bbox_inches="tight"
     )
@@ -677,8 +726,7 @@ for node in top_nodes:
         }
     )
 
-view.zoomTo()
-view.show()
+show_3d_view(view, "Visualização 3D dos resíduos com maior Degree Centrality")
 
 
 
